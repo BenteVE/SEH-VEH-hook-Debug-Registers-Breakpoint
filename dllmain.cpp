@@ -1,6 +1,9 @@
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <stdio.h>
+#include "Console.h"
+
+Console console;
 
 DWORD func_addr = NULL;
 DWORD func_addr_offset = NULL;
@@ -9,16 +12,16 @@ DWORD func_addr_offset = NULL;
 void modify_text(PCONTEXT debug_context) {
     DWORD oldProtection{};
     VirtualProtect((LPVOID)(debug_context), 0x1000, PAGE_READWRITE, &oldProtection);
-    printf("Changed Protection");
+    fprintf(console.stream, "Changed Protection");
 
     //TODO: debug this, changes in stack causes crash
     //char* text = (char*)(*(DWORD*)(debug_context->Esp + 0x8));
     //int length = strlen(text);
-    //_snprintf(text, length, "REPLACED");
+    //_snfprintf(console.stream, text, length, "REPLACED");
 
-    printf("Replaced text");
+    fprintf(console.stream, "Replaced text");
     VirtualProtect((LPVOID)(debug_context), 0x1000, oldProtection, &oldProtection);
-    printf("Changed Protection");
+    fprintf(console.stream, "Changed Protection");
 }
 
 // This stub function contains the first instruction of the function that has the breakpoint on it. 
@@ -27,24 +30,24 @@ void modify_text(PCONTEXT debug_context) {
 // To find the first instruction of the function you are replacing, you can use Ghidra. 
 // Make sure you analyze the correct DLL (32-bit in SysWOW64 folder or 64-bit in System32 folder).
 void __declspec(naked) MessageBoxW_trampoline(void) {
-    printf("before trampoline\n");
+    fprintf(console.stream, "before trampoline\n");
     __asm {
         mov edi, edi
         jmp[func_addr_offset]
     }
-    printf("after trampoline\n");
+    fprintf(console.stream, "after trampoline\n");
 }
 
 // print parameters to console 
 void print_parameters(PCONTEXT debug_context) {
-    printf("EAX: %X EBX: %X ECX: %X EDX: %X\n",
+    fprintf(console.stream, "EAX: %X EBX: %X ECX: %X EDX: %X\n",
         debug_context->Eax, debug_context->Ebx, debug_context->Ecx, debug_context->Edx);
-    printf("ESP: %X EBP: %X\n",
+    fprintf(console.stream, "ESP: %X EBP: %X\n",
         debug_context->Esp, debug_context->Ebp);
-    printf("ESI: %X EDI: %X\n",
+    fprintf(console.stream, "ESI: %X EDI: %X\n",
         debug_context->Esi, debug_context->Edi);
 
-    printf("Parameters\n"
+    fprintf(console.stream, "Parameters\n"
         "HWND: %p\n"
         "lptext: %s\n"
         "lpcaption: %s\n"
@@ -66,14 +69,14 @@ LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
     if (ExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_SINGLE_STEP) {
         if ((DWORD)ExceptionInfo->ExceptionRecord->ExceptionAddress == func_addr) {
             PCONTEXT debug_context = ExceptionInfo->ContextRecord;
-            printf("Breakpoint hit!\n");
+            fprintf(console.stream, "Breakpoint hit!\n");
             print_parameters(debug_context);
             
-            printf("Modifying parameters on stack (not implemented).\n");
+            fprintf(console.stream, "Modifying parameters on stack (not implemented).\n");
             //modify parameters on stack
             //modify_text(debug_context);
 
-            printf("Using trampoline to go to instruction after breakpoint.\n");
+            fprintf(console.stream, "Using trampoline to go to instruction after breakpoint.\n");
             debug_context->Eip = (DWORD)&MessageBoxW_trampoline; //PAGE FAULT bij executing trampoline (op wine)
             //VirtualProtect() => proberen oplossen op Wine
 
@@ -115,7 +118,7 @@ DWORD WINAPI installSEHHook(PVOID base) {
                         if (hMainThread != NULL)
                             CloseHandle(hMainThread);
                         hMainThread = hThread;
-                        printf("Main thread found!\n");
+                        fprintf(console.stream, "Main thread found!\n");
                     }
                     else
                         CloseHandle(hThread);
@@ -123,10 +126,10 @@ DWORD WINAPI installSEHHook(PVOID base) {
                 thread_entry32.dwSize = sizeof(THREADENTRY32);
             } while (Thread32Next(hTool32, &thread_entry32));
 
-            printf("Setting Exception Filter.\n");
+            fprintf(console.stream, "Setting Exception Filter.\n");
             (void)SetUnhandledExceptionFilter(ExceptionFilter);
             
-            printf("Setting breakpoint in Dr registers.\n");
+            fprintf(console.stream, "Setting breakpoint in Dr registers.\n");
             /*
             Eight debug registers (DR0 to DR7):
             — DR4 and DR5 are no longer used and their functionality is replaced with DR6 and DR7
@@ -140,7 +143,7 @@ DWORD WINAPI installSEHHook(PVOID base) {
             // Removing the breakpoints is as simple as clearing the debug registers in the main thread.
 
             //As test: also set for this thread and call function
-            printf("Test: calling MessageBox.\n");
+            fprintf(console.stream, "Test: calling MessageBox.\n");
             SetThreadContext(GetCurrentThread(), &thread_context);
             MessageBoxW(NULL, L"Finished", L"MyMessageBox", MB_OK);
 
@@ -163,12 +166,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
         // and whose DLLs do not need these thread - level notifications of attachment/detachment.
         DisableThreadLibraryCalls(hModule);
 
-        // Open console for debugging
-        if (AllocConsole()) {
-            freopen_s(&stream, "CONOUT$", "w", stdout);
-            SetConsoleTitle(L"Console");
-            SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_BLUE);
-            printf("DLL loaded.\n");
+        if (!console.open()) {
+            // Indicate DLL loading failed
+            return FALSE;
         }
 
         // install SEH hook
