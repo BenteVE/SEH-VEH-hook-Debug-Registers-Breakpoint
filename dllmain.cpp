@@ -1,54 +1,3 @@
-/*
-    SOURCES: 
-        - https://www.codereversing.com/blog/archives/76
-    PROJECT SETTINGS: 
-
-    INFO:
-        - USAGE: 
-            This code creates a DLL. When the DLL is injected in an application it will install an SEH hook on the 
-            MessageBoxW function to change the text in the textbox.
-
-        - Different ways to create SEH/VEH hooks
-            There are several ways to trigger an exception that will be caught by our Exception handler:
-                - STATUS_GUARD_PAGE_VIOLATION
-                - STATUS_ACCESS_VIOLATION (with NO_ACCESS flag)
-                - EXCEPTION BREAKPOINT (INT3 opcode)
-                - setting Dr registers in PCONTEXT
-
-            When we return to the place of the exception after executing our hook, we have to make sure the exception is not triggered again.
-            There are 2 ways to accomplish this:
-                - SINGLE STEP EXCEPTION
-                - creating a trampoline with assembly
-
-            There are also different ways to install an exception handler
-                - by using SetUnhandledExceptionFilter/SetVectoredExceptionHandler
-                - by changing pointers in Thead Information Block (TIB) with assembly
-                  (https://www.mpgh.net/forum/showthread.php?t=291797)
-                  (http://www.rohitab.com/discuss/topic/36211-c-hooking-functions-with-breakpoints-and-seh/)
-
-            In this program we will use the Dr registers in combination with an assembly trampoline to trigger and recover from the exception,
-            and we will use SetUnhandledExceptionFilter to install the handler
-
-        - SEH: 
-            Structured Exception Handlers (SEHs) in Windows are stored as a linked list.
-            When an exception is raised, this list is traversed until a handler for the exception is found.
-            If one is found then the handler gains execution of the program and handles the exception.
-            If one is not found then the application goes into an undefined state and may crash depending on the type of exception.
-
-        - HARDWARE BREAKPOINTS: 
-            To use hardware breakpoints there are eight debug registers (DR0 to DR7) that can be utilized. 
-            Eight, however, is a bit of an overstatement — DR4 and DR5 are no longer used and their functionality is 
-            replaced with DR6 and DR7, so there are really six. The debug registers DR0 – DR3 can each hold a linear 
-            address to break on depending on how the debug control (DR7) register is set. The debug status (DR6) 
-            register lets a debugger determine which debug conditions have occurred. 
-            Therefore, you are permitted four addresses to set hardware breakpoints on 
-            (assuming that they’re not being chained across threads).   
-            Removing the breakpoints is as simple as clearing the debug registers in the main thread.
-
-        - BUILDING
-            Because of the assembly code, this can only be compiled for x86
-*/
-
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <stdio.h>
@@ -178,10 +127,17 @@ DWORD WINAPI installSEHHook(PVOID base) {
             (void)SetUnhandledExceptionFilter(ExceptionFilter);
             
             printf("Setting breakpoint in Dr registers.\n");
+            /*
+            Eight debug registers (DR0 to DR7):
+            — DR4 and DR5 are no longer used and their functionality is replaced with DR6 and DR7
+            - DR0 to DR3 can each hold a linear address to break on depending on how the debug control (DR7) register is set. 
+            - The debug status (DR6) register lets a debugger determine which debug conditions have occurred. 
+            */
             CONTEXT thread_context = { CONTEXT_DEBUG_REGISTERS }; //CONTEXT structure is set up with ContextFlags being CONTEXT_DEBUG_REGISTERS
             thread_context.Dr0 = func_addr; // DR0 is set to the desired address (address of MessageBoxW)
             thread_context.Dr7 = (1 << 0); // DR7 is set to a global enable level for the address in DR0
             SetThreadContext(hMainThread, &thread_context);
+            // Removing the breakpoints is as simple as clearing the debug registers in the main thread.
 
             //As test: also set for this thread and call function
             printf("Test: calling MessageBox.\n");
