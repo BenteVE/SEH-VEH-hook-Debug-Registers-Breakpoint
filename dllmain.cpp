@@ -5,29 +5,12 @@
 
 Console console;
 
-
-
-// To find parameters of the function you are replacing, you can use Ghidra.
-void modify_text(PCONTEXT debug_context) {
-	DWORD oldProtection{};
-	VirtualProtect((LPVOID)(debug_context), 0x1000, PAGE_READWRITE, &oldProtection);
-	fprintf(console.stream, "Changed Protection");
-
-	//TODO: debug this, changes in stack causes crash
-	//char* text = (char*)(*(DWORD*)(debug_context->Esp + 0x8));
-	//int length = strlen(text);
-	//_snfprintf(console.stream, text, length, "REPLACED");
-
-	fprintf(console.stream, "Replaced text");
-	VirtualProtect((LPVOID)(debug_context), 0x1000, oldProtection, &oldProtection);
-	fprintf(console.stream, "Changed Protection");
-}
-
 // This stub function contains the first instruction of the function that has the breakpoint on it. 
 // Then it jumps one byte past the breakpoint address, where the next instruction starts. 
 // This is needed because if EIP is not modified, the exception will be raised again once the handler finishes and an infinite loop will occur.
 // To find the first instruction of the function you are replacing, you can use Ghidra. 
 // Make sure you analyze the correct DLL (32-bit in SysWOW64 folder or 64-bit in System32 folder).
+// Note: it should also be possible to dynamically copy the instructions at func_addr to execute them somewhere else
 DWORD func_addr = NULL;
 DWORD func_addr_offset = NULL;
 void __declspec(naked) MessageBoxW_trampoline(void) {
@@ -57,14 +40,29 @@ void print_parameters(PCONTEXT debug_context) {
 		(char*)(*(PDWORD)(debug_context->Esp + 0x8)),
 		(char*)(*(PDWORD)(debug_context->Esp + 0xC)), //prints first char of the parameter (Why only first character?)
 		(UINT)(*(PDWORD)(debug_context->Esp + 0x10))); //prints 23h == MB_ICONQUESTION + MB_YESNOCANCEL
+}
 
+// To find parameters of the function you are replacing, you can use Ghidra.
+void modify_text(PCONTEXT debug_context) {
+	DWORD oldProtection{};
+	VirtualProtect((LPVOID)(debug_context), 0x1000, PAGE_READWRITE, &oldProtection);
+	fprintf(console.stream, "Changed Protection");
+
+	//TODO: debug this, changes in stack causes crash
+	//char* text = (char*)(*(DWORD*)(debug_context->Esp + 0x8));
+	//int length = strlen(text);
+	//_snfprintf(console.stream, text, length, "REPLACED");
+
+	fprintf(console.stream, "Replaced text");
+	VirtualProtect((LPVOID)(debug_context), 0x1000, oldProtection, &oldProtection);
+	fprintf(console.stream, "Changed Protection");
 }
 
 // When an exception is raised, ExceptionFilter checks to see whether the exception occurred at the desired address.
 // If so, the exception is handled and now the context record 
 // (containing, among other things, the values of all registers and flags when the breakpoint was hit).
 // Since the function sets up a standard BP - based frame, the parameters can all be retrieved through 
-// ESP(since the stack frame was not set up yet when the breakpoint was hit). 
+// ESP (since the stack frame was not set up yet when the breakpoint was hit). 
 // All registers and parameters can then be inspected and/or modified as shown in print_parameters and modify_text.
 LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
 	if (ExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_SINGLE_STEP) {
@@ -147,15 +145,16 @@ LPCSTR function_name = "MessageBoxW";
 HANDLE h_main_thread = NULL;
 
 // create a CONTEXT structure with ContextFlags CONTEXT_DEBUG_REGISTERS
-// to access the 'eight' debug registers(DR0 to DR7) :
-// — DR4 and DR5 are no longer used and their functionality is replaced with DR6 and DR7
-// - DR0 to DR3 can each hold a linear address to break on depending on how the debug control(DR7) register is set.
+// to access the debug registers: https://en.wikipedia.org/wiki/X86_debug_register
+// - DR4 and DR5 are no longer used and their functionality is replaced with DR6 and DR7
+// - DR0 to DR3 can each hold a linear address to break on depending on how the debug control register (DR7) is set.
 // - The debug status(DR6) register lets a debugger determine which debug conditions have occurred.
 CONTEXT thread_context = { CONTEXT_DEBUG_REGISTERS };
 
 DWORD WINAPI testHook(PVOID base) {
 	fprintf(console.stream, "Testing the hook ...\n");
 	SetThreadContext(GetCurrentThread(), &thread_context);
+	// Note: The pseudo handle need not be closed when it is no longer needed
 	MessageBoxW(NULL, L"Testing the hook", L"Testing", MB_OK);
 
 	return 0;
@@ -196,15 +195,15 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		// Set the exception filter
 		fprintf(console.stream, "Setting Exception Filter.\n");
 		(void)SetUnhandledExceptionFilter(ExceptionFilter);
-
-		// Alternative using VectoredExceptionHandler:
+		// AddVectoredExceptionHandler
 
 		// Set debug registers in thread context to trigger exception
 		fprintf(console.stream, "Setting breakpoint in Dr registers.\n");
 
 
 		thread_context.Dr0 = func_addr; // DR0 is set to the desired address (address of MessageBoxW)
-		thread_context.Dr7 = (1 << 0); // DR7 is set to a global enable level for the address in DR0
+		thread_context.Dr7 = (1 << 0); // DR7 is set to a local enable level for the address in DR0
+		
 		SetThreadContext(h_main_thread, &thread_context);
 		// Removing the breakpoints is as simple as clearing the debug registers in the main thread.
 
@@ -218,8 +217,11 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 	case DLL_PROCESS_DETACH: {
 		fprintf(console.stream, "Uninstalling the hook ...\n");
 
-		thread_context.Dr0 = 0;
-		thread_context.Dr7 = 0;
+		thread_context = { CONTEXT_DEBUG_REGISTERS };
+		SetThreadContext(h_main_thread, &thread_context);
+
+		(void)SetUnhandledExceptionFilter(NULL);
+		// RemoveVectoredExceptionHandler
 
 		CloseHandle(h_main_thread);
 
