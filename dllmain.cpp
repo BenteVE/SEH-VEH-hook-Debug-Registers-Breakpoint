@@ -31,15 +31,16 @@ void print_parameters(PCONTEXT debug_context) {
 	fprintf(console.stream, "ESI: %X EDI: %X\n",
 		debug_context->Esi, debug_context->Edi);
 
-	fprintf(console.stream, "Parameters\n"
-		"HWND: %p\n"
-		"lptext: %s\n"
-		"lpcaption: %s\n"
-		"type: %X\n",
-		(HWND)(*(PDWORD)(debug_context->Esp + 0x4)), //ESP is stack pointer, all parameters are on the stack
-		(char*)(*(PDWORD)(debug_context->Esp + 0x8)),
-		(char*)(*(PDWORD)(debug_context->Esp + 0xC)), //prints first char of the parameter (Why only first character?)
-		(UINT)(*(PDWORD)(debug_context->Esp + 0x10))); //prints 23h == MB_ICONQUESTION + MB_YESNOCANCEL
+	//ESP is stack pointer, all parameters are on the stack
+	fprintf(console.stream, "Parameters:\n");
+	fprintf(console.stream, "HWND: %p\n", (HWND)(*(PDWORD)(debug_context->Esp + 0x4)));
+
+	// MessageBoxW uses wide strings
+	fwprintf(console.stream, L"lptext:    %s\n", (LPCWSTR)(*(PDWORD)(debug_context->Esp + 0x8)));
+	fwprintf(console.stream, L"lpcaption: %s\n", (LPCWSTR)(*(PDWORD)(debug_context->Esp + 0xC)));
+
+	fprintf(console.stream, "type: % X\n", (UINT)(*(PDWORD)(debug_context->Esp + 0x10)));
+	// Example: 23h == MB_ICONQUESTION + MB_YESNOCANCEL
 }
 
 // To find parameters of the function you are replacing, you can use Ghidra.
@@ -203,7 +204,7 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 
 		thread_context.Dr0 = func_addr; // DR0 is set to the desired address (address of MessageBoxW)
 		thread_context.Dr7 = (1 << 0); // DR7 is set to a local enable level for the address in DR0
-		
+
 		SetThreadContext(h_main_thread, &thread_context);
 		// Removing the breakpoints is as simple as clearing the debug registers in the main thread.
 
