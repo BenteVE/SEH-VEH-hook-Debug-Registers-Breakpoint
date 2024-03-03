@@ -28,7 +28,8 @@ void print_parameters(PCONTEXT debug_context) {
 	fprintf(console.stream, "ESP: %X EBP: %X\n", debug_context->Esp, debug_context->Ebp);
 	fprintf(console.stream, "ESI: %X EDI: %X\n", debug_context->Esi, debug_context->Edi);
 
-	//ESP is stack pointer, all parameters are on the stack
+	// ESP is the stack pointer, all parameters are on the stack
+	// To find the parameters, you can use documentation (if available) or a decompiler like Ghidra.
 	fprintf(console.stream, "Function parameters:\n");
 	fprintf(console.stream, "HWND: %p\n", (HWND)(*(PDWORD)(debug_context->Esp + 0x4)));
 
@@ -40,20 +41,13 @@ void print_parameters(PCONTEXT debug_context) {
 	// Example: 23h == MB_ICONQUESTION + MB_YESNOCANCEL
 }
 
-// To find parameters of the function you are replacing, you can use Ghidra.
-void modify_text(PCONTEXT debug_context) {
+// Change the stack to update the caption shown in the MessageBox
+LPCWSTR hook_caption = L"Hooked MessageBox";
+void modify_stack(PCONTEXT debug_context) {
 	DWORD oldProtection{};
-	VirtualProtect((LPVOID)(debug_context), 0x1000, PAGE_READWRITE, &oldProtection);
-	fprintf(console.stream, "Changed Protection");
-
-	//TODO: debug this, changes in stack causes crash
-	//char* text = (char*)(*(DWORD*)(debug_context->Esp + 0x8));
-	//int length = strlen(text);
-	//_snfprintf(console.stream, text, length, "REPLACED");
-
-	fprintf(console.stream, "Replaced text");
-	VirtualProtect((LPVOID)(debug_context), 0x1000, oldProtection, &oldProtection);
-	fprintf(console.stream, "Changed Protection");
+	VirtualProtect((LPVOID)(debug_context->Esp + 0xC), sizeof(PDWORD), PAGE_READWRITE, &oldProtection);
+	*(PDWORD)(debug_context->Esp + 0xC) = (DWORD)hook_caption;
+	VirtualProtect((LPVOID)(debug_context->Esp + 0xC), sizeof(PDWORD), oldProtection, &oldProtection);
 }
 
 // When an exception is raised, ExceptionFilter checks to see whether the exception occurred at the desired address.
@@ -69,8 +63,8 @@ LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
 			fprintf(console.stream, "Breakpoint hit, reading registers and function parameters ...\n");
 			print_parameters(debug_context);
 
-			fprintf(console.stream, "Modifying parameters on stack (not implemented).\n");
-			//modify_text(debug_context);
+			fprintf(console.stream, "Modifying parameters on stack\n");
+			modify_stack(debug_context);
 
 			fprintf(console.stream, "Using trampoling\n");
 			debug_context->Eip = (DWORD)&MessageBoxW_trampoline;
