@@ -150,6 +150,10 @@ DWORD WINAPI testHook(PVOID base) {
 	return 0;
 }
 
+// When using the Vectored Exception Handler, this is used to remove the VEH
+// (unused when using SEH instead) 
+PVOID VEH_Handle = nullptr;
+
 BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReserved)
 {
 	switch (ul_reason_for_call)
@@ -182,10 +186,10 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 			return FALSE;
 		}
 
-		// Set the exception filter
 		fprintf(console.stream, "Setting Exception Filter.\n");
+		// Set the Exception Handler (choose SEH or VEH!)
 		(void)SetUnhandledExceptionFilter(ExceptionFilter);
-		// AddVectoredExceptionHandler
+		//VEH_Handle = AddVectoredExceptionHandler(1, ExceptionFilter);
 
 		// Set debug registers in thread context to trigger exception
 		fprintf(console.stream, "Setting breakpoint in Dr registers.\n");
@@ -210,8 +214,9 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD  ul_reason_for_call, LPVOID lpReser
 		thread_context = { CONTEXT_DEBUG_REGISTERS };
 		SetThreadContext(h_main_thread, &thread_context);
 
+		// Remove the Exception Handler (choose SEH or VEH!)
 		(void)SetUnhandledExceptionFilter(NULL);
-		// RemoveVectoredExceptionHandler
+		//RemoveVectoredExceptionHandler(VEH_Handle);
 
 		CloseHandle(h_main_thread);
 
