@@ -14,25 +14,22 @@ Console console;
 DWORD func_addr = NULL;
 DWORD func_addr_offset = NULL;
 void __declspec(naked) MessageBoxW_trampoline(void) {
-	fprintf(console.stream, "before trampoline\n");
 	__asm {
 		mov edi, edi
 		jmp[func_addr_offset]
 	}
-	fprintf(console.stream, "after trampoline\n");
 }
 
 // print parameters to console 
 void print_parameters(PCONTEXT debug_context) {
-	fprintf(console.stream, "EAX: %X EBX: %X ECX: %X EDX: %X\n",
-		debug_context->Eax, debug_context->Ebx, debug_context->Ecx, debug_context->Edx);
-	fprintf(console.stream, "ESP: %X EBP: %X\n",
-		debug_context->Esp, debug_context->Ebp);
-	fprintf(console.stream, "ESI: %X EDI: %X\n",
-		debug_context->Esi, debug_context->Edi);
+	fprintf(console.stream, "Registers:\n");
+	fprintf(console.stream, "EAX: %X EBX: %X\n", debug_context->Eax, debug_context->Ebx);
+	fprintf(console.stream, "ECX: %X EDX: %X\n", debug_context->Ecx, debug_context->Edx);
+	fprintf(console.stream, "ESP: %X EBP: %X\n", debug_context->Esp, debug_context->Ebp);
+	fprintf(console.stream, "ESI: %X EDI: %X\n", debug_context->Esi, debug_context->Edi);
 
 	//ESP is stack pointer, all parameters are on the stack
-	fprintf(console.stream, "Parameters:\n");
+	fprintf(console.stream, "Function parameters:\n");
 	fprintf(console.stream, "HWND: %p\n", (HWND)(*(PDWORD)(debug_context->Esp + 0x4)));
 
 	// MessageBoxW uses wide strings
@@ -69,16 +66,14 @@ LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
 	if (ExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_SINGLE_STEP) {
 		if ((DWORD)ExceptionInfo->ExceptionRecord->ExceptionAddress == func_addr) {
 			PCONTEXT debug_context = ExceptionInfo->ContextRecord;
-			fprintf(console.stream, "Breakpoint hit!\n");
+			fprintf(console.stream, "Breakpoint hit, reading registers and function parameters ...\n");
 			print_parameters(debug_context);
 
 			fprintf(console.stream, "Modifying parameters on stack (not implemented).\n");
-			//modify parameters on stack
 			//modify_text(debug_context);
 
-			fprintf(console.stream, "Using trampoline to go to instruction after breakpoint.\n");
-			debug_context->Eip = (DWORD)&MessageBoxW_trampoline; //PAGE FAULT bij executing trampoline (op wine)
-			//VirtualProtect() => proberen oplossen op Wine
+			fprintf(console.stream, "Using trampoling\n");
+			debug_context->Eip = (DWORD)&MessageBoxW_trampoline;
 
 			return EXCEPTION_CONTINUE_EXECUTION;
 		}
