@@ -5,12 +5,9 @@
 
 Console console;
 
-// This stub function contains the first instruction of the function that has the breakpoint on it. 
-// Then it jumps one byte past the breakpoint address, where the next instruction starts. 
-// This is needed because if EIP is not modified, the exception will be raised again once the handler finishes and an infinite loop will occur.
-// To find the first instruction of the function you are replacing, you can use Ghidra. 
-// Make sure you analyze the correct DLL (32-bit in SysWOW64 folder or 64-bit in System32 folder).
-// Note: it should also be possible to dynamically copy the instructions at func_addr to execute them somewhere else
+// This stub function contains the first instruction of the function with the breakpoint
+// => then the function jumps to the second instruction of the original function 
+// => this way we execute every instruction of the original function without triggering another exception and an infinite loop
 DWORD func_addr = NULL;
 DWORD func_addr_offset = NULL;
 void __declspec(naked) MessageBoxW_trampoline(void) {
@@ -18,9 +15,12 @@ void __declspec(naked) MessageBoxW_trampoline(void) {
 		mov edi, edi
 		jmp[func_addr_offset]
 	}
+	// Note: To find the first instruction of the hook function, you can use documentation (if available) or Ghidra
+	// => Make sure you analyze the correct DLL (32-bit in SysWOW64 folder or 64-bit in System32 folder).
+	// Note: it should also be possible to dynamically copy the instructions at func_addr instead of hardcoding it in assembly here
 }
 
-// print parameters to console 
+// print the content of the registers and the stack to the console 
 void print_parameters(PCONTEXT debug_context) {
 	fprintf(console.stream, "Registers:\n");
 	fprintf(console.stream, "EAX: %X EBX: %X\n", debug_context->Eax, debug_context->Ebx);
@@ -50,15 +50,15 @@ void modify_stack(PCONTEXT debug_context) {
 	VirtualProtect((LPVOID)(debug_context->Esp + 0xC), sizeof(PDWORD), oldProtection, &oldProtection);
 }
 
-// When an exception is raised, ExceptionFilter checks to see whether the exception occurred at the desired address.
-// If so, the exception is handled and now the context record 
-// (containing, among other things, the values of all registers and flags when the breakpoint was hit).
-// Since the function sets up a standard BP - based frame, the parameters can all be retrieved through 
-// ESP (since the stack frame was not set up yet when the breakpoint was hit). 
-// All registers and parameters can then be inspected and/or modified as shown in print_parameters and modify_text.
+
+// Used to pass to the Structured/Vectored Exception Handler
 LONG WINAPI ExceptionFilter(PEXCEPTION_POINTERS ExceptionInfo) {
+	// Check if the ExceptionFilter caught the exception of the Debug Register or another unrelated exception
+	// The Debug registers cause an EXCEPTION_SINGLE_STEP 
 	if (ExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_SINGLE_STEP) {
+		// Check if the address of the exception matches the address of the hooked function
 		if ((DWORD)ExceptionInfo->ExceptionRecord->ExceptionAddress == func_addr) {
+			// Use the ContextRecord to view/modify the arguments of the hooked function
 			PCONTEXT debug_context = ExceptionInfo->ContextRecord;
 			fprintf(console.stream, "Breakpoint hit, reading registers and function parameters ...\n");
 			print_parameters(debug_context);
