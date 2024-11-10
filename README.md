@@ -1,39 +1,59 @@
-# SEH/VEH hooking using Debug Registers
+# Structered/Vectored Exception Handler hook
 
-A Structured or Vectored Exception Handler (SEH/VEH) hook
+A demo of a Structured or Vectored Exception Handler (SEH/VEH) hook using Debug Registers to trigger the exception and recovering with an assembly trampoline.
 
-## Exception Handling
+## Structured/Vectored Exception Handler
 
-### Structured Exception Handler
+Structured Exception Handling (SEH) is a mechanism for handling both hardware and software exceptions.
+This enables applications to have complete control over the handling of exceptions and provides support for debuggers.
+Vectored Exception Handling is an extension to Structured Exception Handling.
 
-Structured Exception Handlers (SEHs) in Windows are stored as a linked list.
-When an exception is raised, this list is traversed until a handler for the exception is found.
-If one is found then the handler gains execution of the program and handles the exception.
-If one is not found then the application goes into an undefined state and may crash depending on the type of exception.
+When an exception is raised, a list of ExceptionFilters will be traversed until a handler for that particular exception is found.
+Once the ExceptionFilter is finished handling the exception, it can return control to the rest of the application.
 
-### Vectored Exception Handler
+## SEH/VEH hook
 
-## Installing the hook
+To install a SEH hook, we will first inject the DLL in this project using a [DLL injector](https://github.com/BenteVE/DLL-Injector).
+This DLL contains a trampoline function, an ExceptionFilter and an installation function.
 
-### Creating an exception
+To install the hook, we can use `SetUnhandledExceptionFilter` for an SEH hook or `SetVectoredExceptionHandler` for a VEH hook.
+In both cases, the ExceptionFilter can be the same.
 
-- STATUS_GUARD_PAGE_VIOLATION
-- STATUS_ACCESS_VIOLATION (with NO_ACCESS flag)
-- EXCEPTION BREAKPOINT (INT3 opcode)
-- setting Dr registers in PCONTEXT
+Inside the ExceptionFilter, we can use the `ContextRecord` to view the function parameters and modify them on the stack.
 
-### Recovering from the exception
+In this implementation we trigger the exception by using the [X86 debug registers](https://en.wikipedia.org/wiki/X86_debug_register) to set a breakpoint at the first byte of the target function implementation.
 
-When we return to the place of the exception after executing our hook, we have to make sure the exception is not triggered again.
+Once the ExceptionFilter is done, we need to skip the first byte of the function to avoid an infinite loop.
+In this implementation we will use a trampoline function that executes the first assembly instruction that was overwritten, and then jumps the second instruction of the original function.
+We can find the first instruction with a decompiler like [Ghidra](https://github.com/NationalSecurityAgency/ghidra).
+Alternatively, it is also possible to copy the instruction into the trampoline before overwriting it.
 
-- SINGLE STEP EXCEPTION
-- creating a trampoline with assembly instructions
+![Ghidra X86 analysis](doc/ghidra_x86_analysis.png)
 
-### Installing the ExceptionFilter
+The triggering and recovering from the exceptions can be accomplished in multiple different ways.
+For some alternative implementations of a SEH/VEH hook, you can view:
 
-- by using SetUnhandledExceptionFilter/SetVectoredExceptionHandler
-- by changing pointers in Thead Information Block (TIB) with assembly
+- [SEH/VEH hook triggering exception with INT3 opcode](https://github.com/BenteVE/SEH-VEH-hook-INT3-opcode)
+- [SEH/VEH hook using Page Guard exceptions](https://github.com/BenteVE/SEH-VEH-hook-Page-Guard-Exception)
 
-## Example
+## Demo
 
-In this example we will use the Dr registers in combination with an assembly trampoline to trigger and recover from the exception, and we will use SetUnhandledExceptionFilter to install the handler.
+In this particular implementation, we will hook the `MessageBoxW` function in the `user32.dll`.
+The ExceptionFilter will modify the function arguments on the stack to replace the title.
+
+1. Clone the repository:
+
+    ```bash
+    git clone https://github.com/BenteVE/SEH-VEH-hook-Debug-Registers-Breakpoint.git
+    ```
+
+2. Build the DLL for the desired architecture (x86) using Visual Studio.
+   The architecture of the DLL should match the architecture of the target program and the used DLL injector.
+
+3. Use a DLL injector to inject the built DLL into the target process.
+   The injector used here is available in another [repository](https://github.com/BenteVE/DLL-Injector) with a detailed explanation.
+
+4. Trigger an action that uses a `MessageBox` in the target program to verify that the hook worked.
+   For Notepad++, attempting to close an unsaved file does this:
+
+    ![Demo](doc/demo.gif)
